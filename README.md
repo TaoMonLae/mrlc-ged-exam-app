@@ -3,7 +3,7 @@
 
 A self-hosted **Exam + Quiz web application** built for **Mon Refugee Learning Centre (MRLC)** to run GED practice quizzes/exams **locally (offline-first)** with an option to enable **remote access**. Teachers can manage classes, students, passages for reading comprehension, questions, quizzes, and export results—while students can join and take timed quizzes with a **server-enforced timer**.
 
-**Author:** Tao Mon Lae
+**Develop by:** Tao Mon Lae
 
 ---
 
@@ -305,9 +305,3 @@ First build downloads dependencies; later builds use Docker cache.
 
 ---
 
-## Author
-
-**Tao Mon Lae**
-
-```
-```
