@@ -1,4 +1,3 @@
-cat > README.md << 'EOF'
 # MRLC GED Exam App
 
 Offline-first web app for MRLC GED classes to manage students, build question banks, create quizzes/exams, and run timed assessments with server-enforced timers.
