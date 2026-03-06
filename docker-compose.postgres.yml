@@ -1,0 +1,26 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ged
+      POSTGRES_PASSWORD: gedpass
+      POSTGRES_DB: gedapp
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  app:
+    build: .
+    ports:
+      - "4001:4001"
+    environment:
+      - PORT=4001
+      - DATABASE_URL=postgresql://ged:gedpass@db:5432/gedapp
+      - JWT_SECRET=change_me_now
+      - SEED_ADMIN=true
+    depends_on:
+      - db
+    restart: unless-stopped
+
+volumes:
+  pg_data:
