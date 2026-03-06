@@ -1,87 +1,34 @@
-# MRLC GED Exam + Quiz App (Local-first, Docker-ready)
+cat > README.md << 'EOF'
+# MRLC GED Exam App
 
-A local-first web app for MRLC GED classes to create and run exams/quizzes (RLA, Math, Science, Social Studies).
-Designed for **offline LAN use**, with **optional remote access** later. Built so you can run with **SQLite** (offline)
-and switch to **Postgres** for hosted/remote usage.
+Offline-first web app for MRLC GED classes to manage students, build question banks, create quizzes/exams, and run timed assessments with server-enforced timers.
 
-## Features (template)
-- Roles: **Admin / Teacher / Student**
-- **Two student login modes** (configurable per class):
-  1) **Account login** (username + password)
-  2) **Class Code + Name** (no password) with roster-only or free-typing policy
-- **RLA Passage/Paragraph library**: teacher adds passages and attaches questions
-- Question bank (MCQ, multi-select, short answer, reorder, numeric)
-- Quiz builder (pick questions, time limit, publish)
-- Student quiz runner (timer, autosave draft, submit)
-- Results + CSV export (basic)
+## Key Features
+- Admin/Teacher dashboard (class management, roster, passages, questions, quizzes)
+- Student join (class code + optional PIN) + student login support
+- Passage library (RLA comprehension + other subjects)
+- Question bank with tags + difficulty
+- Quiz builder (publish/unpublish, shuffle, time limit)
+- **Server-enforced timer** (attempt has `endsAt`; autosave/submit respects expiry)
+- Results:
+  - Quiz marks export CSV
+  - Class marks matrix + report (with missing students list)
+  - Leaderboard (per quiz)
 
-> This is a clean, working starter. You can extend question types, add printing, analytics, multilingual UI, etc.
+## Tech Stack
+- Frontend: React + Vite
+- Backend: Node.js (Express)
+- ORM: Prisma
+- DB:
+  - SQLite (offline/local)
+  - Postgres (remote/hosted option)
+- Docker-ready
 
 ---
 
-## Quick start (SQLite, recommended for offline)
-### Requirements
-- Docker + Docker Compose
+## Run with Docker (SQLite)
+Default port: **4001**
 
-### Run
 ```bash
 docker compose -f docker-compose.sqlite.yml up -d --build
-```
-
-Open:
-- http://localhost:8080
-
-### Default admin account
-On first run, the app seeds a default admin:
-- username: **admin**
-- password: **admin123**
-
-Change it after login.
-
----
-
-## Postgres (for VPS / full remote)
-```bash
-docker compose -f docker-compose.postgres.yml up -d --build
-```
-
----
-
-## Local development (no Docker)
-### Backend
-```bash
-cd server
-npm install
-npx prisma migrate dev
-npm run dev
-```
-
-### Frontend
-```bash
-cd web
-npm install
-npm run dev
-```
-
-Frontend dev proxy is configured to `http://localhost:8080`.
-
----
-
-## Remote access options (later)
-- Recommended: **Tailscale** (private + secure)
-- Or: **Cloudflare Tunnel** (public URL, still safe if configured)
-
----
-
-## Project structure
-- `server/` Express API + Prisma
-- `web/` React (Vite) UI
-- `Dockerfile` builds web and serves it from the backend
-- `docker-compose.*.yml` SQLite and Postgres stacks
-
----
-
-## Notes
-- SQLite is great for single-server (school desktop) usage.
-- Postgres is better if you host on VPS or expect many concurrent users editing content.
 
