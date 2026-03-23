@@ -1,0 +1,15 @@
+Drop your logo and favicon files into this folder:
+
+  logo.png     ← School logo shown in navbar + login page
+                 Recommended: PNG, transparent background, ~200×60px or square
+                 Will auto-scale to fit
+
+  favicon.png  ← Browser tab icon (shown in tab + bookmarks)
+                 Recommended: PNG, 64×64px or 256×256px, square
+
+Both files are served at:
+  http://localhost:4000/logo.png
+  http://localhost:4000/favicon.png
+
+After adding the files, just rebuild:
+  docker compose -f docker-compose.sqlite.yml up -d --build

@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { loadAuth } from '../lib/auth'
 import BackBar from "../components/BackBar.jsx"
+import ConfirmModal from '../components/ConfirmModal.jsx'
 
 export default function Passages() {
   const { classId } = useParams()
@@ -22,6 +23,7 @@ export default function Passages() {
   const [editSaving, setEditSaving] = useState(false)
   // Expand
   const [expanded, setExpanded] = useState(null)
+  const [confirmState, setConfirmState] = useState(null)
 
   async function refresh() {
     const d = await api(`/api/passages?classId=${classId}&subject=${subject}`, { token: auth.token })
@@ -59,8 +61,16 @@ export default function Passages() {
     setEditSaving(false)
   }
 
-  async function deletePassage(id, title) {
-    if (!confirm(`Delete "${title}"? Questions linked to this passage will be unlinked.`)) return
+  function deletePassage(id, title) {
+    setConfirmState({
+      title: `Delete "${title}"?`,
+      message: 'Questions linked to this passage will be unlinked. This cannot be undone.',
+      danger: true,
+      confirmLabel: 'Delete Passage',
+      onConfirm: () => doDeletePassage(id)
+    })
+  }
+  async function doDeletePassage(id) {
     try {
       await api(`/api/passages/${id}`, { token: auth.token, method: 'DELETE' })
       setPassages(passages.filter(p => p.id !== id))
@@ -95,7 +105,14 @@ export default function Passages() {
         <h3 style={{ marginBottom: 16 }}>➕ Add New Passage</h3>
         <label className="small">Title</label>
         <input className="input" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g., The Water Cycle" />
-        <label className="small">Passage Content</label>
+        <label className="small" style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>Passage Content</span>
+          {content && (() => {
+            const words = content.trim().split(/\s+/).filter(Boolean).length
+            const mins = Math.ceil(words / 200)
+            return <span style={{ fontWeight: 400, color: 'var(--text3)' }}>{words.toLocaleString()} words · ~{mins} min read</span>
+          })()}
+        </label>
         <textarea className="input" value={content} onChange={e => setContent(e.target.value)}
           placeholder="Paste or type the full passage text…" style={{ minHeight: 160 }} />
         <div style={{ marginTop: 14 }}>
@@ -125,7 +142,13 @@ export default function Passages() {
             <div>
               <label className="small">Title</label>
               <input className="input" value={editTitle} onChange={e => setEditTitle(e.target.value)} />
-              <label className="small">Content</label>
+              <label className="small" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Content</span>
+                {editContent && (() => {
+                  const words = editContent.trim().split(/\s+/).filter(Boolean).length
+                  return <span style={{ fontWeight: 400, color: 'var(--text3)' }}>{words.toLocaleString()} words</span>
+                })()}
+              </label>
               <textarea className="input" value={editContent} onChange={e => setEditContent(e.target.value)} style={{ minHeight: 140 }} />
               <div className="row" style={{ marginTop: 12 }}>
                 <button className="btn sm" onClick={saveEdit} disabled={editSaving}>
@@ -140,7 +163,11 @@ export default function Passages() {
                 <div>
                   <strong style={{ fontSize: '1rem' }}>{p.title}</strong>
                   <div style={{ marginTop: 4, fontSize: '.8rem', color: 'var(--text3)' }}>
-                    {new Date(p.createdAt).toLocaleDateString()} · {p.content.length} chars
+                    {(() => {
+                      const words = p.content.trim().split(/\s+/).filter(Boolean).length
+                      const mins = Math.ceil(words / 200)
+                      return `${new Date(p.createdAt).toLocaleDateString()} · ${words.toLocaleString()} words · ~${mins} min read`
+                    })()}
                   </div>
                 </div>
                 <div className="row nowrap">
@@ -160,6 +187,7 @@ export default function Passages() {
           )}
         </div>
       ))}
+      {confirmState && <ConfirmModal {...confirmState} onClose={() => setConfirmState(null)} />}
     </div>
   )
 }

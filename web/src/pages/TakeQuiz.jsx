@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { loadAuth } from '../lib/auth'
@@ -16,62 +16,134 @@ export default function TakeQuiz() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [result, setResult] = useState(null)
   const [warning, setWarning] = useState('')
-  const [activePassage, setActivePassage] = useState(null) // passage object for split view
+  const [activePassage, setActivePassage] = useState(null)
   const submitRef = useRef(false)
+  const attemptRef = useRef(null)   // always has latest attempt
+  const answersRef = useRef({})     // always has latest answers for auto-submit
 
+  // ── Load quiz + start/resume attempt ──────────────────────────────────
   useEffect(() => {
     if (!auth?.token) return
     ;(async () => {
       try {
         const q = await api(`/api/quizzes/${id}/student`, { token: auth.token })
         setQuiz(q.quiz)
-        setSecondsLeft(null)
-        const a = await api('/api/attempts/start', { token: auth.token, method: 'POST', body: { quizId: id } })
-        setAttempt(a.attempt)
-        if (typeof a.serverRemainingSec === 'number') setSecondsLeft(a.serverRemainingSec)
-        if (a.expired && a.attempt?.status === 'SUBMITTED') setWarning('⏱️ Time expired — your attempt was auto-submitted.')
-        setAnswers(JSON.parse(a.attempt.answersJson || '{}'))
-        // Pre-set first passage if any
         const firstWithPassage = q.quiz.questions.find(qq => qq.passage)
         if (firstWithPassage) setActivePassage(firstWithPassage.passage)
+
+        const a = await api('/api/attempts/start', { token: auth.token, method: 'POST', body: { quizId: id } })
+        const att = a.attempt
+        setAttempt(att)
+        attemptRef.current = att
+
+        // Use server-authoritative remaining time
+        if (typeof a.serverRemainingSec === 'number') {
+          setSecondsLeft(a.serverRemainingSec)
+        }
+
+        if (a.expired && att?.status === 'SUBMITTED') {
+          setWarning('⏱️ Time expired — your attempt was auto-submitted.')
+        }
+
+        const saved = JSON.parse(att.answersJson || '{}')
+        setAnswers(saved)
+        answersRef.current = saved
       } catch (e) { setErr(e.message) }
     })()
   }, [id])
 
+  // ── Countdown (client-side tick, re-synced with server every 30s) ─────
   useEffect(() => {
     if (secondsLeft === null) return
-    if (secondsLeft <= 0) { if (!submitRef.current) doSubmit(); return }
-    const t = setInterval(() => setSecondsLeft(s => s - 1), 1000)
-    return () => clearInterval(t)
-  }, [secondsLeft])
+    if (secondsLeft <= 0) {
+      if (!submitRef.current) doSubmit()
+      return
+    }
+    const tick = setInterval(() => setSecondsLeft(s => {
+      if (s <= 1) { clearInterval(tick); return 0 }
+      return s - 1
+    }), 1000)
+    return () => clearInterval(tick)
+  }, [secondsLeft === null ? null : Math.floor(secondsLeft / 30)]) // restart effect only on 30s boundaries
 
+  // Separate effect for warnings triggered by exact secondsLeft values
   useEffect(() => {
     if (secondsLeft === 300) showWarn('⏰ 5 minutes remaining!')
-    if (secondsLeft === 60) showWarn('⚠️ Only 1 minute left!')
+    if (secondsLeft === 60)  showWarn('⚠️ Only 1 minute left!')
+    if (secondsLeft === 0 && !submitRef.current) doSubmit()
   }, [secondsLeft])
 
-  function showWarn(m) { setWarning(m); setTimeout(() => setWarning(''), 4000) }
+  // ── Server time sync every 30 seconds ────────────────────────────────
+  useEffect(() => {
+    if (!attempt?.id || secondsLeft === null) return
+    const syncInterval = setInterval(async () => {
+      try {
+        const t = await api(`/api/attempts/${attempt.id}/time`, { token: auth.token })
+        if (t.status === 'SUBMITTED') {
+          // Already submitted server-side (e.g. tab was left open)
+          if (!submitRef.current) {
+            submitRef.current = true
+            setResult({ score: 0, totalPoints: 0, marksReleased: false, autoExpired: true })
+          }
+          return
+        }
+        // Drift correction: trust server if diff > 5s
+        setSecondsLeft(prev => {
+          const diff = Math.abs((prev || 0) - t.remainingSec)
+          return diff > 5 ? t.remainingSec : prev
+        })
+      } catch {}
+    }, 30000)
+    return () => clearInterval(syncInterval)
+  }, [attempt?.id, secondsLeft !== null])
+
+  function showWarn(m) { setWarning(m); setTimeout(() => setWarning(''), 5000) }
 
   const timeLabel = useMemo(() => {
     if (secondsLeft === null) return '--:--'
-    return `${String(Math.floor(secondsLeft/60)).padStart(2,'0')}:${String(secondsLeft%60).padStart(2,'0')}`
+    const s = Math.max(0, secondsLeft)
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
   }, [secondsLeft])
 
   const timerColor = secondsLeft !== null && secondsLeft < 60 ? 'var(--danger)'
     : secondsLeft !== null && secondsLeft < 300 ? 'var(--warning)' : 'var(--text)'
 
-  async function autosave(next) {
+  // ── Autosave ──────────────────────────────────────────────────────────
+  const autosave = useCallback(async (next) => {
     setAnswers(next)
-    if (!attempt) return
-    try { await api(`/api/attempts/${attempt.id}/save`, { token: auth.token, method: 'PATCH', body: { answers: next } }) } catch {}
-  }
+    answersRef.current = next
+    if (!attemptRef.current) return
+    try {
+      const res = await api(`/api/attempts/${attemptRef.current.id}/save`, {
+        token: auth.token, method: 'PATCH', body: { answers: next }
+      })
+      // Server says time expired during save → auto submit
+      if (res.expired && res.autoSubmitted) {
+        if (!submitRef.current) {
+          submitRef.current = true
+          setResult({ score: res.attempt?.score ?? 0, totalPoints: res.totalPoints ?? 0, marksReleased: res.marksReleased ?? false })
+        }
+      }
+      if (typeof res.serverRemainingSec === 'number') {
+        setSecondsLeft(prev => {
+          const diff = Math.abs((prev || 0) - res.serverRemainingSec)
+          return diff > 5 ? res.serverRemainingSec : prev
+        })
+      }
+    } catch {}
+  }, [auth?.token])
 
+  // ── Submit ─────────────────────────────────────────────────────────────
   async function doSubmit() {
     if (submitRef.current) return
     submitRef.current = true
     setIsSubmitting(true); setErr('')
     try {
-      const d = await api(`/api/attempts/${attempt.id}/submit`, { token: auth.token, method: 'POST', body: { answers } })
+      const att = attemptRef.current
+      if (!att) throw new Error('No active attempt')
+      const d = await api(`/api/attempts/${att.id}/submit`, {
+        token: auth.token, method: 'POST', body: { answers: answersRef.current }
+      })
       setResult({ score: d.attempt.score, totalPoints: d.totalPoints, marksReleased: d.marksReleased })
     } catch (e) {
       setErr(e.message); submitRef.current = false; setIsSubmitting(false)
@@ -85,7 +157,7 @@ export default function TakeQuiz() {
 
   const hasPassages = quiz?.questions?.some(q => q.passage)
 
-  if (!auth || auth.type !== 'STUDENT') return <div className="card">Please login as student.</div>
+  if (!auth || auth.type !== 'STUDENT') return <div className="card">Please login as a student.</div>
   if (err) return (
     <div>
       <div className="banner error" style={{ marginBottom: 16 }}>{err}</div>
@@ -99,8 +171,20 @@ export default function TakeQuiz() {
     </div>
   )
 
-  // Result screen
+  // ── Result screen ─────────────────────────────────────────────────────
   if (result) {
+    if (result.autoExpired) {
+      return (
+        <div style={{ maxWidth: 480, margin: '48px auto' }}>
+          <div className="card" style={{ textAlign: 'center', padding: '40px 32px' }}>
+            <div style={{ fontSize: 64, marginBottom: 12 }}>⏱️</div>
+            <h2>Time Expired</h2>
+            <p style={{ marginBottom: 24 }}>Your quiz was automatically submitted when time ran out.</p>
+            <Link to="/student" className="btn full lg">← Back to Home</Link>
+          </div>
+        </div>
+      )
+    }
     const pct = result.totalPoints > 0 ? Math.round((result.score / result.totalPoints) * 100) : 0
     const passed = pct >= 70
     return (
@@ -112,13 +196,9 @@ export default function TakeQuiz() {
           <div style={{ background: 'var(--bg3)', borderRadius: 12, padding: 28, marginBottom: 28 }}>
             {result.marksReleased ? (
               <>
-                <div style={{ fontSize: 52, fontWeight: 700, color: passed ? 'var(--success)' : 'var(--danger)', fontFamily: "'DM Serif Display', serif" }}>
-                  {pct}%
-                </div>
+                <div style={{ fontSize: 52, fontWeight: 700, color: passed ? 'var(--success)' : 'var(--danger)', fontFamily: "'DM Serif Display', serif" }}>{pct}%</div>
                 <div style={{ color: 'var(--text2)', marginTop: 6 }}>{result.score} / {result.totalPoints} points</div>
-                <div className={`badge ${passed ? 'success' : 'danger'}`} style={{ marginTop: 12 }}>
-                  {passed ? '✓ Passed' : '✗ Needs improvement'}
-                </div>
+                <div className={`badge ${passed ? 'success' : 'danger'}`} style={{ marginTop: 12 }}>{passed ? '✓ Passed' : '✗ Needs improvement'}</div>
               </>
             ) : (
               <>
@@ -157,12 +237,12 @@ export default function TakeQuiz() {
           </div>
         </div>
         <div className="progress-bar" style={{ marginTop: 8, maxWidth: 1060, margin: '8px auto 0' }}>
-          <div className="progress-bar-fill" style={{ width: `${quiz.questions.length ? (answeredCount/quiz.questions.length)*100 : 0}%`, background: accentColor }} />
+          <div className="progress-bar-fill" style={{ width: `${quiz.questions.length ? (answeredCount / quiz.questions.length) * 100 : 0}%`, background: accentColor }} />
         </div>
         {warning && <div className="banner warning" style={{ marginTop: 8, maxWidth: 1060, margin: '8px auto 0' }}>{warning}</div>}
       </div>
 
-      {/* Passage selector (mobile) */}
+      {/* Passage selector bar */}
       {hasPassages && (
         <div style={{ marginBottom: 14, marginTop: 16 }}>
           <div className="card inset" style={{ padding: '10px 14px' }}>
@@ -179,7 +259,6 @@ export default function TakeQuiz() {
         </div>
       )}
 
-      {/* Split layout when passage active */}
       <div className={`quiz-layout ${activePassage ? 'has-passage' : ''}`} style={{ marginTop: 16 }}>
         {/* Passage panel */}
         {activePassage && (
@@ -192,9 +271,7 @@ export default function TakeQuiz() {
                 </div>
                 <button className="btn ghost sm icon" onClick={() => setActivePassage(null)}>✕</button>
               </div>
-              <div style={{ fontSize: '.875rem', lineHeight: 1.85, color: 'var(--text2)', whiteSpace: 'pre-wrap' }}>
-                {activePassage.content}
-              </div>
+              <div style={{ fontSize: '.875rem', lineHeight: 1.85, color: 'var(--text2)', whiteSpace: 'pre-wrap' }}>{activePassage.content}</div>
             </div>
           </div>
         )}
@@ -205,7 +282,6 @@ export default function TakeQuiz() {
             const answered = answers[q.id] !== undefined && answers[q.id] !== '' && !(Array.isArray(answers[q.id]) && answers[q.id].length === 0)
             return (
               <div key={q.id} className="card" style={{ marginBottom: 14, borderLeft: `3px solid ${answered ? 'var(--success)' : 'var(--border)'}` }}>
-                {/* If question has passage, show inline toggle */}
                 {q.passage && (
                   <button className="btn ghost xs" style={{ marginBottom: 8 }} onClick={() => setActivePassage(activePassage?.id === q.passage.id ? null : q.passage)}>
                     📄 {q.passage.title} {activePassage?.id === q.passage.id ? '(hide)' : '(read)'}
@@ -224,19 +300,16 @@ export default function TakeQuiz() {
                 <div style={{ fontSize: '.95rem', lineHeight: 1.7, marginBottom: 14, whiteSpace: 'pre-wrap' }}>{q.prompt}</div>
 
                 {q.type === 'MCQ' && (
-                  <div>
-                    {q.choices?.map((c, i) => {
-                      const val = c.split(')')[0].trim()
-                      const checked = answers[q.id] === val
-                      return (
-                        <label key={i} className={`answer-option ${checked ? 'selected' : ''}`}
-                          onClick={() => autosave({ ...answers, [q.id]: val })}>
-                          <input type="radio" name={q.id} checked={checked} onChange={() => {}} />
-                          <span style={{ fontSize: '.9rem' }}>{c}</span>
-                        </label>
-                      )
-                    })}
-                  </div>
+                  <div>{q.choices?.map((c, i) => {
+                    const val = c.split(')')[0].trim()
+                    const checked = answers[q.id] === val
+                    return (
+                      <label key={i} className={`answer-option ${checked ? 'selected' : ''}`} onClick={() => autosave({ ...answers, [q.id]: val })}>
+                        <input type="radio" name={q.id} checked={checked} onChange={() => {}} />
+                        <span style={{ fontSize: '.9rem' }}>{c}</span>
+                      </label>
+                    )
+                  })}</div>
                 )}
 
                 {q.type === 'MULTI_SELECT' && (
@@ -267,10 +340,8 @@ export default function TakeQuiz() {
 
                 {q.type === 'REORDER' && (
                   <div>
-                    <div style={{ fontSize: '.8rem', color: 'var(--text3)', marginBottom: 6 }}>Enter the correct order as comma-separated numbers (e.g., 2,1,3,4)</div>
-                    <input className="input" value={answers[q.id] || ''}
-                      onChange={e => autosave({ ...answers, [q.id]: e.target.value })}
-                      placeholder="e.g., 2,1,3,4" style={{ maxWidth: 300 }} />
+                    <div style={{ fontSize: '.8rem', color: 'var(--text3)', marginBottom: 6 }}>Enter the correct order as comma-separated numbers (e.g. 2,1,3,4)</div>
+                    <input className="input" value={answers[q.id] || ''} onChange={e => autosave({ ...answers, [q.id]: e.target.value })} placeholder="e.g. 2,1,3,4" style={{ maxWidth: 300 }} />
                   </div>
                 )}
               </div>
@@ -281,7 +352,7 @@ export default function TakeQuiz() {
           <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, background: 'var(--bg3)' }}>
             <div style={{ fontSize: '.875rem', color: answeredCount < quiz.questions.length ? 'var(--warning)' : 'var(--success)', fontWeight: 500 }}>
               {answeredCount < quiz.questions.length
-                ? `⚠️ ${quiz.questions.length - answeredCount} question(s) still unanswered`
+                ? `⚠️ ${quiz.questions.length - answeredCount} question(s) unanswered`
                 : '✅ All questions answered — ready to submit!'}
             </div>
             <div className="row nowrap">

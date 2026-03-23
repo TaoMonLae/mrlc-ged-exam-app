@@ -2,12 +2,14 @@ import React, { useEffect, useState, useRef } from 'react'
 import { api } from '../lib/api'
 import { loadAuth } from '../lib/auth'
 import { Link } from 'react-router-dom'
+import ConfirmModal from '../components/ConfirmModal.jsx'
 
 const SUBJ_ICONS = ['📖','🔢','🔬','🌍']
 
 export default function TeacherHome() {
   const auth = loadAuth()
   const [classes, setClasses] = useState([])
+  const [confirmState, setConfirmState] = useState(null)
   const [name, setName] = useState('')
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
@@ -22,6 +24,29 @@ export default function TeacherHome() {
     if (!auth?.token) return
     api('/api/classes', { token: auth.token }).then(d => setClasses(d.classes)).catch(e => setErr(e.message))
   }, [])
+
+  async function refresh() {
+    const d = await api('/api/classes', { token: auth.token })
+    setClasses(d.classes)
+  }
+
+  async function deleteClass(id, name) {
+    setConfirmState({
+      title: `Delete class "${name}"?`,
+      message: 'This will permanently remove all quizzes, attempts, passages, questions, and roster enrollments for this class.',
+      danger: true,
+      confirmLabel: 'Delete Class',
+      onConfirm: () => doDeleteClass(id)
+    })
+  }
+  async function doDeleteClass(id) {
+    setErr(''); setMsg('');
+    try {
+      await api(`/api/classes/${id}`, { token: auth.token, method: 'DELETE' });
+      setMsg('✓ Class deleted.');
+      await refresh();
+    } catch (e) { setErr(e.message); }
+  }
 
   async function createClass() {
     setErr(''); setMsg('')
@@ -83,20 +108,30 @@ export default function TeacherHome() {
               <div style={{ fontSize: 32 }}>{SUBJ_ICONS[i % 4]}</div>
               <span className="badge accent" style={{ fontFamily: 'monospace', letterSpacing: '.05em' }}>{c.classCode}</span>
             </div>
-            <h3 style={{ margin: '0 0 4px', fontSize: '1rem' }}>{c.name}</h3>
-            <p style={{ fontSize: '.8rem', color: 'var(--text3)', marginBottom: 16 }}>
-              {[c.allowAccountLogin && 'Account', c.allowCodeLogin && 'Code'].filter(Boolean).join(' + ')} login
-            </p>
+            <h3 style={{ margin: '0 0 8px', fontSize: '1rem' }}>{c.name}</h3>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '.78rem', color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                👥 <strong style={{ color: 'var(--text)' }}>{c.studentCount ?? 0}</strong> students
+              </span>
+              <span style={{ fontSize: '.78rem', color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                📝 <strong style={{ color: 'var(--text)' }}>{c.quizCount ?? 0}</strong> quizzes
+              </span>
+              <span style={{ fontSize: '.78rem', color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                ❓ <strong style={{ color: 'var(--text)' }}>{c.questionCount ?? 0}</strong> questions
+              </span>
+            </div>
             <div className="row">
               <Link to={`/teacher/class/${c.id}`} className="btn sm">Open →</Link>
-              <Link to={`/teacher/questions/${c.id}`} className="btn ghost sm">❓ Qs</Link>
+              <Link to={`/teacher/questions/${c.id}`} className="btn ghost sm">❓</Link>
               <Link to={`/teacher/quizzes/${c.id}`} className="btn ghost sm">📝</Link>
+              <Link to={`/teacher/class/${c.id}/report`} className="btn ghost sm">📊</Link>
             </div>
           </div>
         ))}
       </div>
       <button className="carousel-nav right" onClick={() => scrollTrack(1)} aria-label="Scroll right">›</button>
     </div>
+      {confirmState && <ConfirmModal {...confirmState} onClose={() => setConfirmState(null)} />}
     </div>
   )
 }

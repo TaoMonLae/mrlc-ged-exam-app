@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         String
+  createdAt    DateTime @default(now())
+}
+
+model Student {
+  id           String   @id @default(cuid())
+  displayName  String
+  username     String?  @unique
+  passwordHash String?
+  hasPassword  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  enrollments  Enrollment[]
+  attempts     Attempt[]
+}
+
+model Class {
+  id                String   @id @default(cuid())
+  name              String
+  classCode         String   @unique
+  allowAccountLogin Boolean  @default(true)
+  allowCodeLogin    Boolean  @default(true)
+  codeModePolicy    String   @default("ROSTER_ONLY")
+  joinPinHash       String?
+  createdAt         DateTime @default(now())
+  enrollments       Enrollment[]
+  passages          Passage[]
+  questions         Question[]
+  quizzes           Quiz[]
+}
+
+model Enrollment {
+  id        String   @id @default(cuid())
+  classId   String
+  studentId String
+  createdAt DateTime @default(now())
+  class     Class    @relation(fields: [classId], references: [id])
+  student   Student  @relation(fields: [studentId], references: [id])
+  @@unique([classId, studentId])
+}
+
+model Passage {
+  id        String   @id @default(cuid())
+  classId   String
+  subject   String
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  class     Class    @relation(fields: [classId], references: [id])
+  questions Question[]
+}
+
+model Question {
+  id          String   @id @default(cuid())
+  classId     String
+  subject     String
+  type        String
+  prompt      String
+  choicesJson String?
+  answerJson  String
+  explanation String?
+  passageId   String?
+  tags        String   @default("[]")
+  difficulty  String   @default("MEDIUM")
+  createdAt   DateTime @default(now())
+  class       Class    @relation(fields: [classId], references: [id])
+  passage     Passage? @relation(fields: [passageId], references: [id])
+  quizLinks   QuizQuestion[]
+}
+
+model Quiz {
+  id               String    @id @default(cuid())
+  classId          String
+  subject          String
+  title            String
+  timeLimitMin     Int       @default(30)
+  shuffleQuestions Boolean   @default(true)
+  published        Boolean   @default(false)
+  marksReleased    Boolean   @default(false)
+  retakePolicy     String    @default("NO_RETAKE")
+  maxRetakes       Int       @default(0)
+  openAt           DateTime?
+  closeAt          DateTime?
+  createdAt        DateTime  @default(now())
+  class            Class     @relation(fields: [classId], references: [id])
+  questions        QuizQuestion[]
+  attempts         Attempt[]
+}
+
+model QuizQuestion {
+  id         String   @id @default(cuid())
+  quizId     String
+  questionId String
+  order      Int
+  points     Int      @default(1)
+  quiz       Quiz     @relation(fields: [quizId], references: [id])
+  question   Question @relation(fields: [questionId], references: [id])
+  @@unique([quizId, questionId])
+}
+
+model Attempt {
+  id            String    @id @default(cuid())
+  quizId        String
+  studentId     String
+  status        String    @default("IN_PROGRESS")
+  answersJson   String    @default("{}")
+  score         Int       @default(0)
+  scoreOverride Int?
+  overrideNote  String?
+  startedAt     DateTime  @default(now())
+  endsAt        DateTime?
+  submittedAt   DateTime?
+  quiz          Quiz      @relation(fields: [quizId], references: [id])
+  student       Student   @relation(fields: [studentId], references: [id])
+}

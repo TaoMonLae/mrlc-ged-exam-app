@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../lib/api'
+import ConfirmModal from '../components/ConfirmModal.jsx'
 import { loadAuth } from '../lib/auth'
 import BackBar from "../components/BackBar.jsx";
 
@@ -46,6 +47,12 @@ function EditQuestionModal({ q, onSave, onClose }) {
   const [tags, setTags] = useState(q.tags || [])
   const [difficulty, setDifficulty] = useState(q.difficulty || 'MEDIUM')
   const [saving, setSaving] = useState(false)
+  const [activeTab, setActiveTab] = useState('add')
+  // CSV import state
+  const [csvText, setCsvText] = useState('')
+  const [csvPreview, setCsvPreview] = useState([])
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState(null)
   const [err, setErr] = useState('')
 
   function parseAnswer() {
@@ -129,6 +136,26 @@ function EditQuestionModal({ q, onSave, onClose }) {
   )
 }
 
+function parseCsvQuestions(text) {
+  const lines = text.trim().split('\n').filter(Boolean)
+  if (lines.length < 2) return []
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[\'"]/g,''))
+  return lines.slice(1).map(line => {
+    // Handle quoted fields with commas
+    const cols = []; let cur = ''; let inQ = false
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === '"') { inQ = !inQ }
+      else if (line[i] === ',' && !inQ) { cols.push(cur.trim()); cur = '' }
+      else cur += line[i]
+    }
+    cols.push(cur.trim())
+    const obj = {}
+    headers.forEach((h, i) => { obj[h] = (cols[i]||'').replace(/^"|"$/g,'') })
+    return obj
+  }).filter(r => r.prompt || r.question)
+}
+
+
 export default function Questions() {
   const { classId } = useParams()
   const auth = loadAuth()
@@ -147,8 +174,15 @@ export default function Questions() {
   const [difficulty, setDifficulty] = useState('MEDIUM')
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
+  const [confirmState, setConfirmState] = useState(null)
   const [editQ, setEditQ] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [activeTab, setActiveTab] = useState('add')
+  // CSV import state
+  const [csvText, setCsvText] = useState('')
+  const [csvPreview, setCsvPreview] = useState([])
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState(null)
 
   async function refresh() {
     let url = `/api/questions?classId=${classId}&subject=${subject}`
@@ -203,8 +237,16 @@ export default function Questions() {
     } catch (e) { setErr(e.message) }
   }
 
-  async function deleteQ(id) {
-    if (!confirm('Delete this question? It will be removed from any quizzes too.')) return
+  function deleteQ(id) {
+    setConfirmState({
+      title: 'Delete question?',
+      message: 'This will remove the question from any quizzes it belongs to. This cannot be undone.',
+      danger: true,
+      confirmLabel: 'Delete',
+      onConfirm: () => doDeleteQ(id)
+    })
+  }
+  async function doDeleteQ(id) {
     try {
       await api(`/api/questions/${id}`, { token: auth.token, method: 'DELETE' })
       setQuestions(questions.filter(q => q.id !== id))
@@ -224,6 +266,7 @@ export default function Questions() {
   return (
     <div>
       {editQ && <EditQuestionModal q={editQ} onSave={onEditSave} onClose={() => setEditQ(null)} />}
+      {confirmState && <ConfirmModal {...confirmState} onClose={() => setConfirmState(null)} />}
 
       <BackBar to={`/teacher/class/${classId}`} label="Back to Class" />
       <h2>❓ Question Bank</h2>

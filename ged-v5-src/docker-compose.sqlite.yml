@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    ports:
+      - "4001:4001"
+    environment:
+      - PORT=4001
+      - DATABASE_URL=file:/data/ged.sqlite
+      - JWT_SECRET=mrlc_ged_secure_2026
+      - SEED_ADMIN=true
+    volumes:
+      - ged_data:/data
+    restart: unless-stopped
+
+volumes:
+  ged_data:

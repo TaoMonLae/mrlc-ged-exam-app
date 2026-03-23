@@ -12,11 +12,29 @@ export default function StudentProfile() {
   const [student, setStudent] = useState(null)
   const [err, setErr] = useState('')
   const [overrideModal, setOverrideModal] = useState(null)
+  const [showResetPw, setShowResetPw] = useState(false)
+  const [newPw, setNewPw] = useState('')
+  const [pwMsg, setPwMsg] = useState('')
+  const [pwSaving, setPwSaving] = useState(false)
 
   useEffect(() => {
     if (!auth?.token) return
     api(`/api/students/${id}`, { token: auth.token }).then(d => setStudent(d.student)).catch(e => setErr(e.message))
   }, [id])
+
+  async function resetPassword() {
+    if (!newPw.trim() || newPw.trim().length < 4) { setPwMsg('Password must be at least 4 characters'); return }
+    setPwSaving(true); setPwMsg('')
+    try {
+      await api(`/api/students/${id}/reset-password`, {
+        token: auth.token, method: 'POST', body: { newPassword: newPw.trim() }
+      })
+      setPwMsg('✓ Password reset successfully.')
+      setNewPw('')
+      setTimeout(() => { setShowResetPw(false); setPwMsg('') }, 2000)
+    } catch (e) { setPwMsg('Error: ' + e.message) }
+    setPwSaving(false)
+  }
 
   if (!auth || auth.type !== 'USER') return <div className="card">Please login as Admin/Teacher.</div>
   if (err) return <div><div className="banner error">{err}</div></div>
@@ -56,7 +74,29 @@ export default function StudentProfile() {
               </div>
             </div>
           </div>
+          <div className="row nowrap" style={{ alignSelf: 'flex-start' }}>
+            <button className="btn secondary sm" onClick={() => { setShowResetPw(!showResetPw); setPwMsg(''); setNewPw('') }}>
+              🔑 Reset Password
+            </button>
+          </div>
         </div>
+        {showResetPw && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+            {pwMsg && <div className={`banner ${pwMsg.startsWith('Error') ? 'error' : 'success'}`} style={{ marginBottom: 10 }}>{pwMsg}</div>}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 200px' }}>
+                <label className="small">New Password (min 4 chars)</label>
+                <input className="input" type="text" value={newPw} onChange={e => setNewPw(e.target.value)}
+                  placeholder="e.g. newpass123" autoFocus
+                  onKeyDown={e => e.key === 'Enter' && resetPassword()} />
+              </div>
+              <button className="btn warning" onClick={resetPassword} disabled={pwSaving}>
+                {pwSaving ? <span className="spinner"></span> : 'Set Password'}
+              </button>
+              <button className="btn ghost" onClick={() => setShowResetPw(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Stats */}
@@ -101,7 +141,7 @@ export default function StudentProfile() {
         <div className="card flush">
           <div style={{ overflowX: 'auto' }}>
             <table>
-              <thead><tr><th>Quiz</th><th>Subject</th><th>Score</th><th>%</th><th>Marks</th><th>Date</th></tr></thead>
+              <thead><tr><th>Quiz</th><th>Subject</th><th>Score</th><th>%</th><th>Marks</th><th>Date</th><th></th></tr></thead>
               <tbody>
                 {submitted.map(a => {
                   const finalScore = a.scoreOverride ?? a.score
@@ -117,6 +157,7 @@ export default function StudentProfile() {
                       <td><span className={`badge ${pct >= 70 ? 'success' : 'danger'}`}>{pct}%</span></td>
                       <td><span className={`badge ${a.marksReleased ? 'success' : ''}`}>{a.marksReleased ? '✓ Released' : '🔒 Hidden'}</span></td>
                       <td style={{ fontSize: '.8rem', color: 'var(--text3)' }}>{a.submittedAt ? new Date(a.submittedAt).toLocaleDateString() : '—'}</td>
+                      <td><Link to={`/teacher/attempt/${a.id}`} className="btn ghost xs">📋 Review</Link></td>
                     </tr>
                   )
                 })}

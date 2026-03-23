@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { loadAuth } from '../lib/auth'
+import ConfirmModal from '../components/ConfirmModal.jsx'
+import BackBar from "../components/BackBar.jsx"
 
 const SUBJ = ['RLA','MATH','SCIENCE','SOCIAL_STUDIES']
 const DIFF = { EASY: '🟢', MEDIUM: '🟡', HARD: '🔴' }
@@ -136,6 +138,168 @@ function LeaderboardModal({ quizId, quizTitle, onClose }) {
   )
 }
 
+function QuizPreviewModal({ quiz, onClose }) {
+  const auth = loadAuth()
+  const SUBJ_COLOR = { RLA: '#2563eb', MATH: '#059669', SCIENCE: '#d97706', SOCIAL_STUDIES: '#7c3aed' }
+  const accent = SUBJ_COLOR[quiz.subject] || 'var(--accent)'
+  const [detail, setDetail] = useState(null)
+  const [detailErr, setDetailErr] = useState('')
+
+  useEffect(() => {
+    api(`/api/quizzes/${quiz.id}/detail`, { token: auth.token })
+      .then(d => setDetail(d.quiz))
+      .catch(e => setDetailErr(e.message))
+  }, [quiz.id])
+
+  const questions = detail?.questions || []
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, padding: '24px 16px', overflowY: 'auto' }}>
+      <div style={{ width: '100%', maxWidth: 700, paddingBottom: 40 }}>
+        {/* Header bar */}
+        <div className="card" style={{ marginBottom: 14, background: accent, color: '#fff', borderColor: accent }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', opacity: .8, marginBottom: 4 }}>Teacher Preview</div>
+              <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>{quiz.title}</div>
+              <div style={{ fontSize: '.82rem', opacity: .85, marginTop: 2 }}>{quiz.subject} · {quiz.questions?.length || 0} questions · {quiz.timeLimitMin} min</div>
+            </div>
+            <button onClick={onClose} style={{ background: 'rgba(255,255,255,.2)', border: 'none', borderRadius: 8, padding: '8px 14px', color: '#fff', cursor: 'pointer', fontSize: '1rem' }}>✕ Close</button>
+          </div>
+        </div>
+
+        {/* Questions */}
+        {!detail && !detailErr && <div style={{ textAlign: 'center', padding: 24 }}><span className="spinner dark"></span></div>}
+        {detailErr && <div className="banner error">{detailErr}</div>}
+        {detail && questions.length === 0 && (
+          <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--text3)' }}>No questions added yet.</div>
+        )}
+        {questions.map((q, idx) => (
+          <div key={q.id || idx} className="card" style={{ marginBottom: 12, borderLeft: `3px solid ${accent}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+              <span style={{ fontSize: '.78rem', fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                Question {idx + 1} of {questions.length}
+              </span>
+              <div style={{ display: 'flex', gap: 5 }}>
+                <span className="badge">{q.type}</span>
+                {q.points > 1 && <span className="badge accent">{q.points} pts</span>}
+                <span className={`badge ${q.difficulty === 'EASY' ? 'success' : q.difficulty === 'HARD' ? 'danger' : ''}`}>{q.difficulty}</span>
+              </div>
+            </div>
+
+            <div style={{ fontSize: '.95rem', lineHeight: 1.75, marginBottom: 12, whiteSpace: 'pre-wrap' }}>{q.prompt}</div>
+
+            {q.choices && (
+              <div>
+                {q.choices.map((choice, ci) => (
+                  <div key={ci} style={{ padding: '8px 12px', borderRadius: 6, marginBottom: 4, fontSize: '.875rem', background: 'var(--bg3)', border: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ opacity: .5 }}>○</span> {choice}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!q.choices && (q.type === 'SHORT_ANSWER' || q.type === 'NUMERIC') && (
+              <div style={{ height: 36, borderRadius: 6, border: '1px dashed var(--border)', background: 'var(--bg3)', display: 'flex', alignItems: 'center', paddingLeft: 12, color: 'var(--text3)', fontSize: '.875rem' }}>
+                Student types answer here…
+              </div>
+            )}
+
+            {q.explanation && (
+              <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(32,85,212,.06)', borderRadius: 6, fontSize: '.82rem', color: 'var(--text2)', borderLeft: '2px solid var(--accent)' }}>
+                <strong>💡 Explanation:</strong> {q.explanation}
+              </div>
+            )}
+
+            {/* Show answer key */}
+            <div style={{ marginTop: 10, padding: '6px 12px', background: 'var(--success-bg)', borderRadius: 6, fontSize: '.8rem', color: 'var(--success)', border: '1px solid var(--success-border)' }}>
+              <strong>Answer key:</strong> {(() => { try { const a = JSON.parse(q.answerJson || 'null'); return Array.isArray(a) ? a.join(', ') : String(a ?? '') } catch { return q.answerJson || '' } })()}
+            </div>
+          </div>
+        ))}
+
+        <div style={{ textAlign: 'center', marginTop: 8 }}>
+          <button className="btn secondary" onClick={onClose}>Close Preview</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+function EditQuizModal({ quiz, onSave, onClose }) {
+  const [title, setTitle] = useState(quiz.title)
+  const [timeLimitMin, setTimeLimitMin] = useState(quiz.timeLimitMin)
+  const [retakePolicy, setRetakePolicy] = useState(quiz.retakePolicy || 'NO_RETAKE')
+  const [maxRetakes, setMaxRetakes] = useState(quiz.maxRetakes || 1)
+  const [openAt, setOpenAt] = useState(quiz.openAt ? new Date(quiz.openAt).toISOString().slice(0,16) : '')
+  const [closeAt, setCloseAt] = useState(quiz.closeAt ? new Date(quiz.closeAt).toISOString().slice(0,16) : '')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    if (!title.trim()) return
+    setSaving(true)
+    await onSave(quiz, {
+      title: title.trim(),
+      timeLimitMin: Number(timeLimitMin) || 30,
+      retakePolicy,
+      maxRetakes: Number(maxRetakes) || 1,
+      openAt: openAt || null,
+      closeAt: closeAt || null,
+    })
+    setSaving(false)
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999, padding: 16 }}>
+      <div className="card" style={{ maxWidth: 520, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h3 style={{ margin: 0 }}>✏️ Edit Quiz</h3>
+          <button className="btn ghost sm icon" onClick={onClose}>✕</button>
+        </div>
+
+        <label className="small">Title</label>
+        <input className="input" value={title} onChange={e => setTitle(e.target.value)} style={{ marginBottom: 12 }} />
+
+        <label className="small">Time Limit (minutes)</label>
+        <input className="input" type="number" min="1" value={timeLimitMin}
+          onChange={e => setTimeLimitMin(e.target.value)} style={{ marginBottom: 12 }} />
+
+        <label className="small">Retake Policy</label>
+        <select className="input" value={retakePolicy} onChange={e => setRetakePolicy(e.target.value)} style={{ marginBottom: 8 }}>
+          {RETAKE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+
+        {retakePolicy === 'LIMITED' && (
+          <div style={{ marginBottom: 12 }}>
+            <label className="small">Max Attempts</label>
+            <input className="input" type="number" min="1" value={maxRetakes} onChange={e => setMaxRetakes(e.target.value)} />
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+          <div>
+            <label className="small">Opens At (optional)</label>
+            <input className="input" type="datetime-local" value={openAt} onChange={e => setOpenAt(e.target.value)} />
+          </div>
+          <div>
+            <label className="small">Closes At (optional)</label>
+            <input className="input" type="datetime-local" value={closeAt} onChange={e => setCloseAt(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="row nowrap">
+          <button className="btn" onClick={save} disabled={saving || !title.trim()}>
+            {saving ? <><span className="spinner"></span> Saving…</> : 'Save Changes'}
+          </button>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 export default function Quizzes() {
   const { classId } = useParams()
   const auth = loadAuth()
@@ -161,11 +325,26 @@ export default function Quizzes() {
   const [overrideAttempt, setOverrideAttempt] = useState(null)
   const [leaderboardQuiz, setLeaderboardQuiz] = useState(null)
   const [tab, setTab] = useState('quizzes')
+  const [editQuiz, setEditQuiz] = useState(null)    // quiz being edited
+  const [previewQuiz, setPreviewQuiz] = useState(null) // quiz preview modal
+  const [confirmState, setConfirmState] = useState(null)
 
   async function refreshQuizzes() {
     const d = await api(`/api/quizzes?classId=${classId}`, { token: auth.token })
     setQuizzes(d.quizzes)
   }
+  async function saveEditQuiz(q, fields) {
+    try {
+      await api(`/api/quizzes/${q.id}`, {
+        token: auth.token, method: 'PATCH',
+        body: fields
+      })
+      await refreshQuizzes()
+      setEditQuiz(null)
+      setMsg('✓ Quiz updated.')
+    } catch (e) { setErr(e.message) }
+  }
+
   async function refreshQuestions() {
     let url = `/api/questions?classId=${classId}&subject=${subject}`
     if (filterDiff) url += `&difficulty=${filterDiff}`
@@ -231,7 +410,15 @@ export default function Quizzes() {
   }
 
   async function deleteQuiz(id) {
-    if (!confirm('Delete this quiz and all attempts?')) return
+    setConfirmState({
+      title: 'Delete quiz?',
+      message: 'This will permanently delete the quiz and all student attempts. This cannot be undone.',
+      danger: true,
+      confirmLabel: 'Delete Quiz',
+      onConfirm: () => doDeleteQuiz(id)
+    })
+  }
+  async function doDeleteQuiz(id) {
     await api(`/api/quizzes/${id}`, { token: auth.token, method: 'DELETE' })
     setQuizzes(quizzes.filter(q => q.id !== id))
   }
@@ -260,7 +447,15 @@ export default function Quizzes() {
       {leaderboardQuiz && (
         <LeaderboardModal quizId={leaderboardQuiz.id} quizTitle={leaderboardQuiz.title} onClose={() => setLeaderboardQuiz(null)} />
       )}
+      {editQuiz && (
+        <EditQuizModal quiz={editQuiz} onSave={saveEditQuiz} onClose={() => setEditQuiz(null)} />
+      )}
+      {previewQuiz && (
+        <QuizPreviewModal quiz={previewQuiz} onClose={() => setPreviewQuiz(null)} />
+      )}
+      {confirmState && <ConfirmModal {...confirmState} onClose={() => setConfirmState(null)} />}
 
+      <BackBar to={`/teacher/class/${classId}`} title="Back to Class" />
       <div className="page-header">
         <h2>📝 Quizzes & Exams</h2>
       </div>
@@ -429,7 +624,10 @@ export default function Quizzes() {
                     ? <button className="btn secondary sm" onClick={() => setMarks(q.id, false)}>🔒 Hide</button>
                     : <button className="btn sm" onClick={() => setMarks(q.id, true)} disabled={!q.published}>📊 Release</button>}
                   <a className="btn ghost sm" href={`/api/quizzes/${q.id}/marks.csv`} target="_blank" rel="noreferrer">⬇️ CSV</a>
+                  <button className="btn ghost sm" onClick={() => setPreviewQuiz(q)}>👁 Preview</button>
+                  <button className="btn ghost sm" onClick={() => setEditQuiz(q)}>✏️ Edit</button>
                   <button className="btn ghost sm" onClick={() => duplicateQuiz(q.id)}>📄 Copy</button>
+                  <Link className="btn ghost sm" to={`/teacher/quiz/${q.id}/submissions`}>📋 Submissions</Link>
                   <button className="btn purple sm" onClick={() => setLeaderboardQuiz(q)}>🏆</button>
                   <button className="btn danger sm" onClick={() => deleteQuiz(q.id)}>🗑️</button>
                 </div>

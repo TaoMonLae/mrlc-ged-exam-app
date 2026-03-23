@@ -168,7 +168,10 @@ export default function StudentHome() {
                     <h3 style={{ margin: '0 0 4px', fontSize: '.95rem' }}>{q.title}</h3>
                     <p style={{ fontSize: '.8rem', color: 'var(--text3)', marginBottom: 8 }}>{q.className}</p>
                     {q.marksReleased && q.latestAttempt ? (
-                      <span className="badge success">Score: {q.latestAttempt.score} pts</span>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                        <span className="badge success">Score: {q.latestAttempt.score} pts</span>
+                        <Link to={`/student/attempt/${q.latestAttempt.id}`} className="btn ghost xs">📝 Review</Link>
+                      </div>
                     ) : (
                       <span className="badge">⏳ Marks pending</span>
                     )}
@@ -191,7 +194,7 @@ export default function StudentHome() {
             <div className="card flush">
               <div style={{ overflowX: 'auto' }}>
                 <table>
-                  <thead><tr><th>Quiz</th><th>Subject</th><th>Score</th><th>%</th><th>Date</th></tr></thead>
+                  <thead><tr><th>Quiz</th><th>Subject</th><th>Score</th><th>%</th><th>Date</th><th></th></tr></thead>
                   <tbody>
                     {myResults.map(r => (
                       <tr key={r.id}>
@@ -202,6 +205,11 @@ export default function StudentHome() {
                           ? <span className={`badge ${(r.score/r.totalPoints)>=.7?'success':'danger'}`}>{Math.round((r.score/r.totalPoints)*100)}%</span>
                           : '—'}</td>
                         <td style={{ fontSize: '.8rem', color: 'var(--text3)' }}>{r.submittedAt ? new Date(r.submittedAt).toLocaleDateString() : '—'}</td>
+                        <td>
+                          {r.marksReleased
+                            ? <Link to={`/student/attempt/${r.id}`} className="btn ghost xs">📝 Review</Link>
+                            : <span style={{ color: 'var(--text3)', fontSize: '.78rem' }}>Pending</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

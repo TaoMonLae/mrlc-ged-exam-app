@@ -95,6 +95,9 @@ hr{border:none;border-top:1px solid var(--border);margin:20px 0}
 .btn.danger{background:var(--danger);color:#fff}
 .btn.danger:hover:not(:disabled){background:#b91c1c}
 .btn.success{background:var(--success);color:#fff}
+.btn.success:hover:not(:disabled){background:#15803d}
+.btn.warning{background:var(--warning);color:#fff}
+.btn.warning:hover:not(:disabled){background:#92400e}
 .btn.purple{background:var(--accent2);color:#fff}
 .btn.purple:hover:not(:disabled){background:var(--accent2-h)}
 .btn.sm{padding:6px 13px;font-size:.8rem;border-radius:6px}
@@ -308,4 +311,35 @@ tr:hover td{background:var(--bg4)}
 @media (max-width: 860px) {
   .carousel-nav { display: none; }
   .carousel-item { flex-basis: 84vw; }
+}
+
+
+/* v5.3 UI polish */
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;white-space:pre-wrap;background:rgba(127,127,127,.12);padding:8px 10px;border-radius:10px;}
+.alert.info{background:rgba(0,120,255,.12);}
+
+/* ══════════════════════════════════════════════
+   PRINT STYLES  — for AttemptReview answer sheet
+   ══════════════════════════════════════════════ */
+@media print {
+  /* Hide navigation and interactive elements */
+  .no-print,
+  nav, .nav-bar, .sidebar,
+  button:not(.print-visible) { display: none !important; }
+
+  /* Reset backgrounds so ink isn't wasted */
+  body, .card, .card.flush { background: #fff !important; color: #000 !important; }
+  .card { border: 1px solid #ccc !important; box-shadow: none !important; break-inside: avoid; }
+
+  /* Keep colour coding for correct/wrong */
+  [style*="var(--success)"] { color: #16a34a !important; }
+  [style*="var(--danger)"]  { color: #dc2626 !important; }
+
+  /* Answer cards */
+  .card { margin-bottom: 8px !important; page-break-inside: avoid; }
+
+  /* Tighter layout */
+  body { font-size: 11pt; }
+  h2   { font-size: 14pt; }
+  h3   { font-size: 12pt; }
 }
