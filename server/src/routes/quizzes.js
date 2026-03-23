@@ -1,12 +1,13 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const { asyncHandler } = require("../middleware/asyncHandler");
 const router = express.Router();
 
 const { stringify: csvStringify } = require("csv-stringify/sync");
 
 // List quizzes (teacher)
-router.get("/", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, res) => {
+router.get("/", requireAuth, requireRole(["ADMIN","TEACHER"]), asyncHandler(async (req, res) => {
   const { classId } = req.query;
   if (!classId) return res.status(400).json({ error: "classId required" });
   const quizzes = await prisma.quiz.findMany({
@@ -25,11 +26,11 @@ router.get("/", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, res) 
       difficulty: qq.question.difficulty, tags: JSON.parse(qq.question.tags || "[]")
     }))
   })) });
-});
+}));
 
 
 // Duplicate a quiz (Admin/Teacher)
-router.post("/:id/duplicate", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, res) => {
+router.post("/:id/duplicate", requireAuth, requireRole(["ADMIN","TEACHER"]), asyncHandler(async (req, res) => {
   const { id } = req.params;
   const quiz = await prisma.quiz.findUnique({
     where: { id },
@@ -65,11 +66,11 @@ router.post("/:id/duplicate", requireAuth, requireRole(["ADMIN","TEACHER"]), asy
   }
 
   res.json({ quiz: copy });
-});
+}));
 
 
 // Export marks for a quiz as CSV (Admin/Teacher)
-router.get("/:id/marks.csv", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, res) => {
+router.get("/:id/marks.csv", requireAuth, requireRole(["ADMIN","TEACHER"]), asyncHandler(async (req, res) => {
   const { id } = req.params;
   const quiz = await prisma.quiz.findUnique({
     where: { id },
@@ -99,10 +100,82 @@ router.get("/:id/marks.csv", requireAuth, requireRole(["ADMIN","TEACHER"]), asyn
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="quiz-marks-${id}.csv"`);
   res.send(csv);
-});
+}));
+
+// Teacher/Admin: list submissions for a quiz
+router.get("/:id/submissions", requireAuth, requireRole(["ADMIN","TEACHER"]), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const quiz = await prisma.quiz.findUnique({
+    where: { id },
+    include: { questions: true, class: true }
+  });
+  if (!quiz) return res.status(404).json({ error: "Quiz not found" });
+
+  const [attempts, enrollments] = await Promise.all([
+    prisma.attempt.findMany({
+      where: { quizId: id },
+      include: { student: true },
+      orderBy: [{ status: "asc" }, { submittedAt: "desc" }, { startedAt: "desc" }]
+    }),
+    quiz.classId
+      ? prisma.enrollment.findMany({ where: { classId: quiz.classId }, include: { student: true } })
+      : Promise.resolve([])
+  ]);
+
+  const totalPoints = (quiz.questions || []).reduce((s, qq) => s + (qq.points || 0), 0);
+
+  // Build set of studentIds who have any attempt
+  const attemptedIds = new Set(attempts.map(a => a.studentId));
+
+  // Enrolled students with no attempt at all
+  const notStarted = enrollments
+    .filter(e => !attemptedIds.has(e.studentId))
+    .map(e => ({
+      id: null,
+      studentId: e.studentId,
+      studentName: e.student?.displayName || "Unknown",
+      status: "NOT_STARTED",
+      score: null,
+      scoreOverride: null,
+      startedAt: null,
+      submittedAt: null
+    }));
+
+  const allRows = [
+    ...attempts.map(a => ({
+      id: a.id,
+      studentId: a.studentId,
+      studentName: a.student?.displayName || "Unknown",
+      status: a.status,
+      score: a.score,
+      scoreOverride: a.scoreOverride,
+      startedAt: a.startedAt,
+      submittedAt: a.submittedAt
+    })),
+    ...notStarted
+  ];
+
+  res.json({
+    quiz: { id: quiz.id, title: quiz.title, subject: quiz.subject, marksReleased: quiz.marksReleased, published: quiz.published },
+    class: quiz.class ? { id: quiz.class.id, name: quiz.class.name } : null,
+    totalPoints,
+    enrolledCount: enrollments.length,
+    attempts: allRows
+  });
+}));
+
+// Teacher/Admin: release or hide marks for a quiz
+router.patch("/:id/marks-release", requireAuth, requireRole(["ADMIN","TEACHER"]), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { marksReleased } = req.body || {};
+  if (typeof marksReleased !== "boolean") return res.status(400).json({ error: "marksReleased must be boolean" });
+
+  const quiz = await prisma.quiz.update({ where: { id }, data: { marksReleased } });
+  res.json({ quiz });
+}));
 
 // Student: list published quizzes
-router.get("/student-list", requireAuth, async (req, res) => {
+router.get("/student-list", requireAuth, asyncHandler(async (req, res) => {
   if (req.user.type !== "STUDENT") return res.status(403).json({ error: "Students only" });
   const enrollments = await prisma.enrollment.findMany({
     where: { studentId: req.user.studentId }, include: { class: true }
@@ -152,10 +225,10 @@ router.get("/student-list", requireAuth, async (req, res) => {
       } : null
     };
   }) });
-});
+}));
 
 // Leaderboard for a quiz
-router.get("/:id/leaderboard", requireAuth, async (req, res) => {
+router.get("/:id/leaderboard", requireAuth, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const quiz = await prisma.quiz.findUnique({ where: { id }, include: { questions: true } });
   if (!quiz) return res.status(404).json({ error: "Quiz not found" });
@@ -177,10 +250,10 @@ router.get("/:id/leaderboard", requireAuth, async (req, res) => {
   }
   const board = Object.values(best).sort((a, b) => b.score - a.score).map((e, i) => ({ rank: i + 1, ...e, totalPoints, pct: totalPoints > 0 ? Math.round((e.score / totalPoints) * 100) : 0 }));
   res.json({ leaderboard: board, totalPoints });
-});
+}));
 
 // Create quiz
-router.post("/", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, res) => {
+router.post("/", requireAuth, requireRole(["ADMIN","TEACHER"]), asyncHandler(async (req, res) => {
   const { classId, subject, title, timeLimitMin, shuffleQuestions, questionIds, pointsMap, retakePolicy, maxRetakes, openAt, closeAt } = req.body || {};
   if (!classId || !subject || !title) return res.status(400).json({ error: "classId, subject, title required" });
   const quiz = await prisma.quiz.create({
@@ -200,10 +273,10 @@ router.post("/", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, res)
     include: { questions: true }
   });
   res.json({ quiz });
-});
+}));
 
 // Update quiz
-router.patch("/:id", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, res) => {
+router.patch("/:id", requireAuth, requireRole(["ADMIN","TEACHER"]), asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { published, marksReleased, title, timeLimitMin, shuffleQuestions, pointsMap, retakePolicy, maxRetakes, openAt, closeAt } = req.body || {};
   const data = {};
@@ -223,19 +296,19 @@ router.patch("/:id", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, 
     }
   }
   res.json({ quiz });
-});
+}));
 
 // Delete quiz
-router.delete("/:id", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, res) => {
+router.delete("/:id", requireAuth, requireRole(["ADMIN","TEACHER"]), asyncHandler(async (req, res) => {
   const { id } = req.params;
   await prisma.attempt.deleteMany({ where: { quizId: id } });
   await prisma.quizQuestion.deleteMany({ where: { quizId: id } });
   await prisma.quiz.delete({ where: { id } });
   res.json({ ok: true });
-});
+}));
 
 // Student: get quiz for taking
-router.get("/:id/student", requireAuth, async (req, res) => {
+router.get("/:id/student", requireAuth, asyncHandler(async (req, res) => {
   if (req.user.type !== "STUDENT") return res.status(403).json({ error: "Students only" });
   const quiz = await prisma.quiz.findUnique({
     where: { id: req.params.id },
@@ -259,16 +332,16 @@ router.get("/:id/student", requireAuth, async (req, res) => {
     }
   }
   res.json({ quiz: { id: quiz.id, title: quiz.title, subject: quiz.subject, timeLimitMin: quiz.timeLimitMin, classId: quiz.classId, className: quiz.class.name, marksReleased: quiz.marksReleased, retakePolicy: quiz.retakePolicy, questions } });
-});
+}));
 
 // Teacher: quiz detail
-router.get("/:id/detail", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, res) => {
+router.get("/:id/detail", requireAuth, requireRole(["ADMIN","TEACHER"]), asyncHandler(async (req, res) => {
   const quiz = await prisma.quiz.findUnique({
     where: { id: req.params.id },
     include: { questions: { include: { question: true }, orderBy: { order: "asc" } }, _count: { select: { attempts: true } } }
   });
   if (!quiz) return res.status(404).json({ error: "Quiz not found" });
   res.json({ quiz: { ...quiz, questionCount: quiz.questions.length, totalPoints: quiz.questions.reduce((s, qq) => s + qq.points, 0), attemptCount: quiz._count.attempts, questions: quiz.questions.map(qq => ({ id: qq.id, questionId: qq.questionId, order: qq.order, points: qq.points, prompt: qq.question.prompt, type: qq.question.type, difficulty: qq.question.difficulty, choices: qq.question.choicesJson ? JSON.parse(qq.question.choicesJson) : null, answerJson: qq.question.answerJson, tags: JSON.parse(qq.question.tags || "[]"), explanation: qq.question.explanation })) } });
-});
+}));
 
 module.exports = router;

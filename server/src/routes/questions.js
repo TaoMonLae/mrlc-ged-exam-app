@@ -92,3 +92,78 @@ router.post("/:id/duplicate", requireAuth, requireRole(["ADMIN", "TEACHER"]), as
 });
 
 module.exports = router;
+
+// Bulk import questions from CSV/JSON
+// Expected body: { classId, rows: [ { subject, type, prompt, choices, answer, explanation, tags, difficulty } ] }
+router.post("/import", requireAuth, requireRole(["ADMIN","TEACHER"]), async (req, res) => {
+  const { classId, rows } = req.body || {};
+  if (!classId || !Array.isArray(rows) || rows.length === 0)
+    return res.status(400).json({ error: "classId and rows array required" });
+
+  const VALID_TYPES = ["MCQ","MULTI_SELECT","SHORT_ANSWER","NUMERIC","REORDER"];
+  const VALID_SUBJ  = ["RLA","MATH","SCIENCE","SOCIAL_STUDIES"];
+  const VALID_DIFF  = ["EASY","MEDIUM","HARD"];
+
+  const created = [], errors = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const rowNum = i + 1;
+    try {
+      const subject = (r.subject || "").toUpperCase().replace(/ /g,"_");
+      const type    = (r.type    || "").toUpperCase().replace(/ /g,"_");
+      if (!VALID_SUBJ.includes(subject))  { errors.push(`Row ${rowNum}: invalid subject "${r.subject}"`); continue; }
+      if (!VALID_TYPES.includes(type))    { errors.push(`Row ${rowNum}: invalid type "${r.type}"`);    continue; }
+      if (!r.prompt || !String(r.prompt).trim()) { errors.push(`Row ${rowNum}: prompt is empty`);  continue; }
+      if (r.answer === undefined || r.answer === null || r.answer === "") { errors.push(`Row ${rowNum}: answer is empty`); continue; }
+
+      // Parse choices (pipe-separated string OR already an array)
+      let choices = null;
+      if (r.choices) {
+        choices = Array.isArray(r.choices)
+          ? r.choices
+          : String(r.choices).split("|").map(c => c.trim()).filter(Boolean);
+      }
+
+      // Parse answer
+      let answer;
+      try {
+        // If it's already valid JSON (array / number), use as-is
+        answer = JSON.parse(r.answer);
+      } catch {
+        answer = String(r.answer).trim();
+      }
+
+      // Parse tags (comma-separated string OR array)
+      let tags = [];
+      if (r.tags) {
+        tags = Array.isArray(r.tags)
+          ? r.tags
+          : String(r.tags).split(",").map(t => t.trim()).filter(Boolean);
+      }
+
+      const difficulty = VALID_DIFF.includes((r.difficulty||"").toUpperCase())
+        ? r.difficulty.toUpperCase() : "MEDIUM";
+
+      const q = await prisma.question.create({
+        data: {
+          classId,
+          subject,
+          type,
+          prompt: String(r.prompt).trim(),
+          choicesJson: choices ? JSON.stringify(choices) : null,
+          answerJson: JSON.stringify(answer),
+          explanation: r.explanation ? String(r.explanation).trim() : null,
+          passageId: null,
+          tags: JSON.stringify(tags),
+          difficulty
+        }
+      });
+      created.push(mapQ(q));
+    } catch (e) {
+      errors.push(`Row ${rowNum}: ${e.message}`);
+    }
+  }
+
+  res.json({ created: created.length, errors, questions: created });
+});

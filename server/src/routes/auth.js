@@ -4,12 +4,13 @@ const prisma = require("../lib/prisma");
 const { signToken } = require("../lib/jwt");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
+const { asyncHandler } = require("../middleware/asyncHandler");
 const router = express.Router();
 
 /**
  * Admin/Teacher login
  */
-router.post("/login", async (req, res) => {
+router.post("/login", asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: "username and password required" });
 
@@ -21,12 +22,12 @@ router.post("/login", async (req, res) => {
 
   const token = signToken({ type: "USER", userId: user.id, role: user.role, username: user.username });
   res.json({ token, role: user.role, username: user.username });
-});
+}));
 
 /**
  * Create teacher (Admin only)
  */
-router.post("/create-teacher", requireAuth, requireRole(["ADMIN"]), async (req, res) => {
+router.post("/create-teacher", requireAuth, requireRole(["ADMIN"]), asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: "username and password required" });
 
@@ -36,12 +37,12 @@ router.post("/create-teacher", requireAuth, requireRole(["ADMIN"]), async (req, 
   const passwordHash = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({ data: { username, passwordHash, role: "TEACHER" } });
   res.json({ id: user.id, username: user.username, role: user.role });
-});
+}));
 
 /**
  * Student account login (username+password)
  */
-router.post("/student-login", async (req, res) => {
+router.post("/student-login", asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: "username and password required" });
 
@@ -53,14 +54,14 @@ router.post("/student-login", async (req, res) => {
 
   const token = signToken({ type: "STUDENT", studentId: student.id, displayName: student.displayName });
   res.json({ token, displayName: student.displayName });
-});
+}));
 
 /**
  * Join with class code + name (no password).
  * If class policy is ROSTER_ONLY, name must match enrolled roster.
  * If FREE_TYPING, student can be created and enrolled automatically.
  */
-router.post("/join-code", async (req, res) => {
+router.post("/join-code", asyncHandler(async (req, res) => {
   const { classCode, displayName, joinPin } = req.body || {};
   if (!classCode || !displayName) return res.status(400).json({ error: "classCode and displayName required" });
 
@@ -123,14 +124,14 @@ router.post("/join-code", async (req, res) => {
     classId: cls.id
   });
   return res.json({ token, displayName: student.displayName, classId: cls.id, className: cls.name });
-});
+}));
 
 
 
 /**
  * Change password (Admin/Teacher - self)
  */
-router.post("/change-password", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
+router.post("/change-password", requireAuth, requireRole(["ADMIN", "TEACHER"]), asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   if (!currentPassword || !newPassword) return res.status(400).json({ error: "currentPassword and newPassword required" });
   if (String(newPassword).length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
@@ -145,23 +146,23 @@ router.post("/change-password", requireAuth, requireRole(["ADMIN", "TEACHER"]), 
   await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
 
   res.json({ ok: true });
-});
+}));
 
 /**
  * List users (Admin only)
  */
-router.get("/users", requireAuth, requireRole(["ADMIN"]), async (req, res) => {
+router.get("/users", requireAuth, requireRole(["ADMIN"]), asyncHandler(async (req, res) => {
   const users = await prisma.user.findMany({
     orderBy: { createdAt: "desc" },
     select: { id: true, username: true, role: true, createdAt: true }
   });
   res.json({ users });
-});
+}));
 
 /**
  * Reset user password (Admin only)
  */
-router.post("/reset-user-password", requireAuth, requireRole(["ADMIN"]), async (req, res) => {
+router.post("/reset-user-password", requireAuth, requireRole(["ADMIN"]), asyncHandler(async (req, res) => {
   const { userId, newPassword } = req.body || {};
   if (!userId || !newPassword) return res.status(400).json({ error: "userId and newPassword required" });
   if (String(newPassword).length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
@@ -173,9 +174,20 @@ router.post("/reset-user-password", requireAuth, requireRole(["ADMIN"]), async (
   await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
 
   res.json({ ok: true });
-});
-router.get("/me", requireAuth, async (req, res) => {
+}));
+router.get("/me", requireAuth, asyncHandler(async (req, res) => {
   res.json({ user: req.user });
-});
+}));
+
+// Delete user/teacher (Admin only — cannot delete self)
+router.delete("/users/:id", requireAuth, requireRole(["ADMIN"]), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (id === req.user.userId) return res.status(400).json({ error: "Cannot delete your own account" });
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) return res.status(404).json({ error: "User not found" });
+  if (user.role === "ADMIN") return res.status(400).json({ error: "Cannot delete an admin account" });
+  await prisma.user.delete({ where: { id } });
+  res.json({ ok: true });
+}));
 
 module.exports = router;

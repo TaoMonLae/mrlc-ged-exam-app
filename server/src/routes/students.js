@@ -37,7 +37,6 @@ router.get("/:id", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, r
     }
   });
   if (!student) return res.status(404).json({ error: "Student not found" });
-
   res.json({
     student: {
       id: student.id,
@@ -49,24 +48,17 @@ router.get("/:id", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, r
       attempts: student.attempts.map(a => {
         const totalPoints = a.quiz.questions.reduce((s, qq) => s + qq.points, 0);
         return {
-          id: a.id,
-          quizId: a.quizId,
-          quizTitle: a.quiz.title,
-          subject: a.quiz.subject,
-          score: a.score,
-          scoreOverride: a.scoreOverride,
-          overrideNote: a.overrideNote,
-          totalPoints,
-          marksReleased: a.quiz.marksReleased,
-          status: a.status,
-          submittedAt: a.submittedAt
+          id: a.id, quizId: a.quizId, quizTitle: a.quiz.title,
+          subject: a.quiz.subject, score: a.score, scoreOverride: a.scoreOverride,
+          overrideNote: a.overrideNote, totalPoints, marksReleased: a.quiz.marksReleased,
+          status: a.status, submittedAt: a.submittedAt
         };
       })
     }
   });
 });
 
-// Update student
+// Update student (name, username, password)
 router.patch("/:id", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
   const { id } = req.params;
   const { displayName, username, password } = req.body || {};
@@ -87,6 +79,20 @@ router.patch("/:id", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req,
   res.json({ student });
 });
 
+// Reset student password (Admin/Teacher)
+router.post("/:id/reset-password", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
+  const { id } = req.params;
+  const { newPassword } = req.body || {};
+  if (!newPassword || String(newPassword).trim().length < 4)
+    return res.status(400).json({ error: "newPassword must be at least 4 characters" });
+  const hash = await bcrypt.hash(String(newPassword).trim(), 10);
+  const student = await prisma.student.update({
+    where: { id },
+    data: { passwordHash: hash, hasPassword: true }
+  });
+  res.json({ ok: true, studentId: student.id });
+});
+
 // Delete student
 router.delete("/:id", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
   const { id } = req.params;
@@ -96,16 +102,14 @@ router.delete("/:id", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req
   res.json({ ok: true });
 });
 
-// Bulk import students
+// Bulk import students from parsed CSV rows
 router.post("/import", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
   const { classId, students: rows } = req.body || {};
   if (!classId || !Array.isArray(rows)) return res.status(400).json({ error: "classId and students array required" });
-
   const results = { created: 0, skipped: 0, errors: [] };
-
   for (const row of rows) {
     const name = (row.displayName || row.name || "").trim();
-    if (!name) { results.errors.push("Row missing displayName"); continue; }
+    if (!name) { results.errors.push("Row missing displayName/name"); continue; }
     try {
       let student = await prisma.student.findFirst({ where: { displayName: name } });
       if (!student) {
@@ -122,9 +126,7 @@ router.post("/import", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (re
         create: { classId, studentId: student.id },
         update: {}
       });
-    } catch (e) {
-      results.errors.push(`${name}: ${e.message}`);
-    }
+    } catch (e) { results.errors.push(`${name}: ${e.message}`); }
   }
   res.json(results);
 });

@@ -14,8 +14,25 @@ function genCode(prefix="MRLC") {
 
 // List classes (Admin/Teacher)
 router.get("/", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
-  const classes = await prisma.class.findMany({ orderBy: { createdAt: "desc" } });
-  res.json({ classes });
+  const classes = await prisma.class.findMany({
+    orderBy: { createdAt: "desc" },
+    include: {
+      _count: {
+        select: {
+          enrollments: true,
+          quizzes: true,
+          questions: true,
+        }
+      }
+    }
+  });
+  res.json({ classes: classes.map(cls => ({
+    ...cls,
+    studentCount: cls._count.enrollments,
+    quizCount: cls._count.quizzes,
+    questionCount: cls._count.questions,
+    _count: undefined
+  })) });
 });
 
 // Create class
@@ -38,9 +55,10 @@ router.post("/", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res
 // Update class settings
 router.patch("/:id", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
   const { id } = req.params;
-  const { allowAccountLogin, allowCodeLogin, codeModePolicy, joinPin } = req.body || {};
+  const { allowAccountLogin, allowCodeLogin, codeModePolicy, joinPin, name } = req.body || {};
 
   const data = {};
+  if (name && String(name).trim()) data.name = String(name).trim();
   if (typeof allowAccountLogin === "boolean") data.allowAccountLogin = allowAccountLogin;
   if (typeof allowCodeLogin === "boolean") data.allowCodeLogin = allowCodeLogin;
   if (codeModePolicy === "ROSTER_ONLY" || codeModePolicy === "FREE_TYPING") data.codeModePolicy = codeModePolicy;
@@ -169,7 +187,17 @@ const missingByQuiz = quizzes.map(q => {
 });
 
 // Export class marks matrix as CSV (Admin/Teacher)
-router.get("/:id/marks-export", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
+// Accepts token via query param for direct download links
+router.get("/:id/marks-export", async (req, res) => {
+  // Allow token via query string for direct <a href> downloads
+  if (req.query.token && !req.headers.authorization) {
+    req.headers.authorization = "Bearer " + req.query.token;
+  }
+  const jwt = require("../lib/jwt");
+  try {
+    const payload = jwt.verify(req.query.token || (req.headers.authorization||"").replace("Bearer ",""));
+    if (!payload || payload.type !== "USER") return res.status(403).json({error:"Forbidden"});
+  } catch { return res.status(401).json({error:"Unauthorized"}); }
   const { id } = req.params;
 
   const rosterEnroll = await prisma.enrollment.findMany({
@@ -216,4 +244,56 @@ router.get("/:id/marks-export", requireAuth, requireRole(["ADMIN", "TEACHER"]), 
   res.send(rows.join("\n"));
 });
 
+// Delete class (Admin/Teacher)
+router.delete("/:id", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
+  const { id } = req.params;
+
+  const cls = await prisma.class.findUnique({ where: { id } });
+  if (!cls) return res.status(404).json({ error: "Class not found" });
+
+  const quizzes = await prisma.quiz.findMany({ where: { classId: id }, select: { id: true } });
+  const quizIds = quizzes.map(q => q.id);
+
+  await prisma.$transaction(async (tx) => {
+    if (quizIds.length) {
+      await tx.attempt.deleteMany({ where: { quizId: { in: quizIds } } });
+      await tx.quizQuestion.deleteMany({ where: { quizId: { in: quizIds } } });
+    }
+    await tx.quiz.deleteMany({ where: { classId: id } });
+
+    await tx.question.deleteMany({ where: { classId: id } });
+    await tx.passage.deleteMany({ where: { classId: id } });
+    await tx.enrollment.deleteMany({ where: { classId: id } });
+
+    await tx.class.delete({ where: { id } });
+  });
+
+  res.json({ ok: true });
+});
+
+// Add an existing student to this class roster (Admin/Teacher)
+router.post("/:id/roster/add-existing", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
+  const { id } = req.params;
+  const { studentId } = req.body || {};
+  if (!studentId) return res.status(400).json({ error: "studentId required" });
+
+  const student = await prisma.student.findUnique({ where: { id: studentId } });
+  if (!student) return res.status(404).json({ error: "Student not found" });
+
+  await prisma.enrollment.upsert({
+    where: { classId_studentId: { classId: id, studentId } },
+    update: {},
+    create: { classId: id, studentId }
+  });
+
+  res.json({ ok: true, student });
+});
+
 module.exports = router;
+
+// Remove student from class roster (unenroll only, don't delete student)
+router.delete("/:id/roster/:studentId", requireAuth, requireRole(["ADMIN", "TEACHER"]), async (req, res) => {
+  const { id, studentId } = req.params;
+  await prisma.enrollment.deleteMany({ where: { classId: id, studentId } });
+  res.json({ ok: true });
+});

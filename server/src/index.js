@@ -34,6 +34,24 @@ const publicDir = path.join(__dirname, "..", "public");
 app.use(express.static(publicDir));
 app.get("*", (req, res) => res.sendFile(path.join(publicDir, "index.html")));
 
+// ── Global Express error handler ──────────────────────────────────────
+// Catches any error passed via next(err) or thrown in async routes
+app.use((err, req, res, _next) => {
+  const status = err.status || err.statusCode || 500
+  const message = err.message || 'Internal server error'
+  console.error(`[ERROR] ${req.method} ${req.path} →`, message)
+  if (!res.headersSent) res.status(status).json({ error: message })
+})
+
+// ── Process-level safety nets ──────────────────────────────────────────
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err)
+  // Don't exit — keep the server alive for other requests
+})
+
 app.listen(PORT, () => {
-  console.log(`MRLC GED app running on http://localhost:${PORT}`);
-});
+  console.log(`MRLC GED app running on http://localhost:${PORT}`)
+})
