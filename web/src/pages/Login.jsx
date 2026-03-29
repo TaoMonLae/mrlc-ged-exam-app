@@ -3,6 +3,12 @@ import { api } from '../lib/api'
 import { saveAuth, loadAuth } from '../lib/auth'
 import { useNavigate } from 'react-router-dom'
 
+const MODES = [
+  { key: 'teacher', icon: '🏫', label: 'Admin / Teacher' },
+  { key: 'student', icon: '🎓', label: 'Student Account' },
+  { key: 'code',    icon: '🔑', label: 'Class Code' },
+]
+
 export default function Login() {
   const nav = useNavigate()
   const existing = loadAuth()
@@ -55,93 +61,137 @@ export default function Login() {
     if (e.key === 'Enter') action()
   }
 
+  const actions = { teacher: loginUser, student: loginStudent, code: joinByCode }
+
   return (
-    <div style={{ maxWidth: 480, margin: '40px auto' }}>
-      <div style={{ textAlign: 'center', marginBottom: 28 }}>
-        {/* ── LOGIN PAGE LOGO ── replace /logo.png in web/public/ ── */}
-        <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'center' }}>
-          <img src="/logo.png" alt="School Logo"
-            style={{ height: 72, width: 'auto', objectFit: 'contain' }}
-            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block' }} />
-          <div style={{ display: 'none', fontSize: 56 }}>📚</div>
+    <div className="tf-login-wrapper" style={{ marginTop: -24, marginBottom: -48 }}>
+      <div className="tf-login-card">
+        {/* Logo + branding */}
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'center' }}>
+            <img
+              src="/logo.png"
+              alt="School Logo"
+              style={{ height: 68, width: 'auto', objectFit: 'contain' }}
+              onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block' }}
+            />
+            <div style={{ display: 'none', fontSize: 52 }}>📚</div>
+          </div>
+          <h1 style={{ fontSize: '1.8rem', marginBottom: 4 }}>MRLC GED</h1>
+          <p style={{ color: 'var(--text3)', fontSize: '.875rem', margin: 0 }}>Exam &amp; Quiz Platform</p>
         </div>
-        <h1 style={{ margin: 0, fontSize: 28 }}>MRLC GED</h1>
-        <p className="small" style={{ marginTop: 4 }}>Exam & Quiz Platform</p>
-      </div>
 
-      {existing && (
-        <div className="banner info" style={{ marginBottom: 16, textAlign: 'center' }}>
-          You are already logged in — use the top menu.
-        </div>
-      )}
+        {existing && (
+          <div className="banner info" style={{ marginBottom: 20, textAlign: 'center' }}>
+            You are already logged in — use the top menu.
+          </div>
+        )}
 
-      <div className="card">
-        <div className="row" style={{ marginBottom: 18 }}>
-          {[['teacher', '🏫 Admin/Teacher'], ['student', '🎓 Student'], ['code', '🔑 Class Code']].map(([t, l]) => (
-            <button key={t} className={`btn ${tab === t ? '' : 'secondary'}`} style={{ flex: 1 }}
-              onClick={() => { setTab(t); setErr('') }}>
-              {l}
+        {/* Mode selector */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 28 }}>
+          {MODES.map(({ key, icon, label }) => (
+            <button
+              key={key}
+              className={`tf-mode-btn ${tab === key ? 'active' : ''}`}
+              onClick={() => { setTab(key); setErr('') }}
+            >
+              <div style={{ fontSize: 18, marginBottom: 3 }}>{icon}</div>
+              <div style={{ lineHeight: 1.3 }}>{label}</div>
             </button>
           ))}
         </div>
 
-        {err && <div className="banner error" style={{ marginBottom: 14 }}>{err}</div>}
+        {err && <div className="banner error" style={{ marginBottom: 18 }}>{err}</div>}
 
+        {/* ── Admin / Teacher ── */}
         {tab === 'teacher' && (
           <div>
-            <h3>Admin / Teacher Login</h3>
-            <label className="small">Username</label>
-            <input className="input" value={username} onChange={e => setUsername(e.target.value)}
-              onKeyDown={e => handleKey(e, loginUser)} autoFocus />
-            <label className="small">Password</label>
-            <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => handleKey(e, loginUser)} />
-            <div style={{ marginTop: 16 }}>
-              <button className="btn full" onClick={loginUser} disabled={loading}>
-                {loading ? <><span className="spinner"></span> Logging in…</> : 'Login'}
-              </button>
-            </div>
-            <p className="small" style={{ textAlign: 'center', marginTop: 10 }}>
+            <label className="tf-field-label">Username</label>
+            <input
+              className="tf-field-input"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              onKeyDown={e => handleKey(e, loginUser)}
+              autoFocus
+              autoComplete="username"
+            />
+            <label className="tf-field-label">Password</label>
+            <input
+              className="tf-field-input"
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => handleKey(e, loginUser)}
+              autoComplete="current-password"
+            />
+            <button className="btn full lg" onClick={loginUser} disabled={loading} style={{ marginTop: 28 }}>
+              {loading ? <><span className="spinner"></span> Signing in…</> : 'Sign In →'}
+            </button>
+            <p style={{ textAlign: 'center', marginTop: 12, fontSize: '.78rem', color: 'var(--text3)' }}>
               Default: <code>admin</code> / <code>admin123</code>
             </p>
           </div>
         )}
 
+        {/* ── Student Account ── */}
         {tab === 'student' && (
           <div>
-            <h3>Student Account Login</h3>
-            <label className="small">Username</label>
-            <input className="input" value={suser} onChange={e => setSuser(e.target.value)}
-              onKeyDown={e => handleKey(e, loginStudent)} autoFocus />
-            <label className="small">Password</label>
-            <input className="input" type="password" value={spass} onChange={e => setSpass(e.target.value)}
-              onKeyDown={e => handleKey(e, loginStudent)} />
-            <div style={{ marginTop: 16 }}>
-              <button className="btn full" onClick={loginStudent} disabled={loading}>
-                {loading ? <><span className="spinner"></span> Logging in…</> : 'Login'}
-              </button>
-            </div>
+            <label className="tf-field-label">Username</label>
+            <input
+              className="tf-field-input"
+              value={suser}
+              onChange={e => setSuser(e.target.value)}
+              onKeyDown={e => handleKey(e, loginStudent)}
+              autoFocus
+              autoComplete="username"
+            />
+            <label className="tf-field-label">Password</label>
+            <input
+              className="tf-field-input"
+              type="password"
+              value={spass}
+              onChange={e => setSpass(e.target.value)}
+              onKeyDown={e => handleKey(e, loginStudent)}
+              autoComplete="current-password"
+            />
+            <button className="btn full lg" onClick={loginStudent} disabled={loading} style={{ marginTop: 28 }}>
+              {loading ? <><span className="spinner"></span> Signing in…</> : 'Sign In →'}
+            </button>
           </div>
         )}
 
+        {/* ── Class Code ── */}
         {tab === 'code' && (
           <div>
-            <h3>Join with Class Code</h3>
-            <label className="small">Class Code</label>
-            <input className="input" value={classCode} onChange={e => setClassCode(e.target.value)}
-              placeholder="MRLC-XXXX" autoFocus onKeyDown={e => handleKey(e, joinByCode)} />
-            <label className="small">Your Name</label>
-            <input className="input" value={displayName} onChange={e => setDisplayName(e.target.value)}
-              placeholder="Full name" onKeyDown={e => handleKey(e, joinByCode)} />
-            <label className="small">PIN (if required)</label>
-            <input className="input" value={joinPin} onChange={e => setJoinPin(e.target.value)}
-              placeholder="Leave blank if none" onKeyDown={e => handleKey(e, joinByCode)} />
-            <div style={{ marginTop: 16 }}>
-              <button className="btn full" onClick={joinByCode} disabled={loading}>
-                {loading ? <><span className="spinner"></span> Joining…</> : 'Join Class'}
-              </button>
-            </div>
-            <p className="small" style={{ marginTop: 8 }}>
+            <label className="tf-field-label">Class Code</label>
+            <input
+              className="tf-field-input"
+              value={classCode}
+              onChange={e => setClassCode(e.target.value)}
+              placeholder="MRLC-XXXX"
+              autoFocus
+              onKeyDown={e => handleKey(e, joinByCode)}
+            />
+            <label className="tf-field-label">Your Name</label>
+            <input
+              className="tf-field-input"
+              value={displayName}
+              onChange={e => setDisplayName(e.target.value)}
+              placeholder="Full name"
+              onKeyDown={e => handleKey(e, joinByCode)}
+            />
+            <label className="tf-field-label">PIN <span style={{ fontWeight: 400, textTransform: 'none' }}>(if required)</span></label>
+            <input
+              className="tf-field-input"
+              value={joinPin}
+              onChange={e => setJoinPin(e.target.value)}
+              placeholder="Leave blank if none"
+              onKeyDown={e => handleKey(e, joinByCode)}
+            />
+            <button className="btn full lg" onClick={joinByCode} disabled={loading} style={{ marginTop: 28 }}>
+              {loading ? <><span className="spinner"></span> Joining…</> : 'Join Class →'}
+            </button>
+            <p style={{ marginTop: 10, fontSize: '.78rem', color: 'var(--text3)', lineHeight: 1.5 }}>
               Your name must be on the roster if Roster Only mode is enabled.
             </p>
           </div>
